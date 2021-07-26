@@ -140,24 +140,47 @@ async def playout_ended_handler(group_call, filename):
 # - Pyrogram handlers
 
 
-@Client.on_message(main_filter & current_vc & filters.regex("^(\\/|!)play$"))
+@Client.on_message(
+    filters.group
+    & ~filters.edited
+    & current_vc
+    & (filters.regex("^(\\/|!)play$") | filters.audio)
+)
 async def play_track(client, m: Message):
     group_call = mp.group_call
     playlist = mp.playlist
-    # show playlist
-    if not m.reply_to_message or not m.reply_to_message.audio:
+    # check audio
+    if m.audio:
+        if m.audio.duration > (DURATION_AUTOPLAY_MIN * 60):
+            reply = await m.reply_text(
+                f"{emoji.ROBOT} audio which duration longer than "
+                f"{str(DURATION_AUTOPLAY_MIN)} min won't be automatically "
+                "added to playlist"
+            )
+            await _delay_delete_messages((reply,), DELETE_DELAY)
+            return
+        m_audio = m
+    elif m.reply_to_message and m.reply_to_message.audio:
+        m_audio = m.reply_to_message
+        if m_audio.audio.duration > (DURATION_PLAY_HOUR * 60 * 60):
+            reply = await m.reply_text(
+                f"{emoji.ROBOT} audio which duration longer than "
+                f"{str(DURATION_PLAY_HOUR)} hours won't be added to playlist"
+            )
+            await _delay_delete_messages((reply,), DELETE_DELAY)
+            return
+    else:
         await mp.send_playlist()
         await m.delete()
         return
     # check already added
-    m_reply = m.reply_to_message
     if playlist and playlist[-1].audio.file_unique_id \
-            == m_reply.audio.file_unique_id:
+            == m_audio.audio.file_unique_id:
         reply = await m.reply_text(f"{emoji.ROBOT} already added")
         await _delay_delete_messages((reply, m), DELETE_DELAY)
         return
     # add to playlist
-    playlist.append(m_reply)
+    playlist.append(m_audio)
     if len(playlist) == 1:
         m_status = await m.reply_text(
             f"{emoji.INBOX_TRAY} downloading and transcoding..."
@@ -174,7 +197,8 @@ async def play_track(client, m: Message):
     await mp.send_playlist()
     for track in playlist[:2]:
         await download_audio(track)
-    await m.delete()
+    if not m.audio:
+        await m.delete()
 
 
 @Client.on_message(main_filter
